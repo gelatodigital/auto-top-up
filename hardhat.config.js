@@ -1,17 +1,15 @@
 require("@nomiclabs/hardhat-waffle");
 require("@nomiclabs/hardhat-ethers");
 require("hardhat-deploy");
+require("hardhat-deploy-ethers");
 require("hardhat-gas-reporter");
-require("@nomiclabs/hardhat-etherscan");
 require("dotenv").config();
-const { task } = require("hardhat/config");
 
 const ALCHEMY_ID = process.env.ALCHEMY_ID;
 const DEPLOYER_PK = process.env.DEPLOYER_PK;
 const DEPLOYER_PK_MAINNET = process.env.DEPLOYER_PK_MAINNET;
 
 if (!ALCHEMY_ID) {
-  /* eslint-disable no-console */
   console.log(
     "\n !! IMPORTANT !!\n Must set ALCHEMY_ID in .env before running hardhat"
   );
@@ -36,16 +34,19 @@ const ropstenAddresses = {
 
 module.exports = {
   defaultNetwork: "hardhat",
-  namedAccounts: {
-    deployer: {
-      default: 0,
-    },
-  },
+
   gasReporter: {
     enabled: process.env.REPORT_GAS ? true : false,
     maxMethodDiff: 25,
     coinmarketcap: process.env.COINMARKETCAP_API_KEY,
   },
+
+  namedAccounts: {
+    deployer: {
+      default: 0,
+    },
+  },
+
   networks: {
     hardhat: {
       forking: {
@@ -69,58 +70,19 @@ module.exports = {
       gasPrice: 10000000000, // 10 Gwei
     },
   },
-  etherscan: {
-    // Your API key for Etherscan
-    // Obtain one at https://etherscan.io/
-    apiKey: process.env.ETHERSCAN_API_KEY,
-  },
+
   solidity: {
     compilers: [
-      // Gelato contracts
       {
         version: "0.8.0",
         settings: {
-          optimizer: require("./solcOptimiserSettings.js"),
-        },
-      },
-      // Krystal contracts
-      {
-        version: "0.6.6",
-        settings: {
-          optimizer: require("./solcOptimiserSettings.js"),
-        },
-      },
-      {
-        version: "0.6.10",
-        settings: {
-          optimizer: require("./solcOptimiserSettings.js"),
+          optimizer: { enabled: true },
         },
       },
     ],
-  },
-
-  paths: {
-    sources: "./contracts",
-    tests: "./test/",
   },
 
   mocha: {
     timeout: 0,
   },
 };
-
-task("iswhitelisted", "determines gnosis safe proxy extcodehash")
-  .addFlag("log", "Logs return values to stdout")
-  .setAction(async (_, hre) => {
-    console.log(hre.network.config.addresses.swapProxyAddress);
-    console.log(hre.network.config.addresses.platformWalletAddress);
-    const smartWalletProxyStorage = await hre.ethers.getContractAt(
-      "SmartWalletSwapStorage",
-      hre.network.config.addresses.swapProxyAddress
-    );
-
-    const isPlatformWallet = await smartWalletProxyStorage.supportedPlatformWallets(
-      hre.network.config.addresses.platformWalletAddress
-    );
-    console.log(`Is PlatformWallet whitelisted? ${isPlatformWallet}`);
-  });
