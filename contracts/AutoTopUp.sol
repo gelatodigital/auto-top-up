@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity 0.8.0;
+pragma solidity 0.8.3;
 
-import {EnumerableSet} from "./openzeppelin/utils/EnumerableSet.sol";
-import {Ownable} from "./openzeppelin/access/Ownable.sol";
+import {
+    EnumerableSet
+} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AutoTopUp is Ownable {
     using EnumerableSet for EnumerableSet.AddressSet;
-
-    address payable public immutable gelato;
 
     struct TopUpData {
         uint256 amount;
         uint256 balanceThreshold;
     }
+
+    address payable public immutable gelato;
 
     EnumerableSet.AddressSet internal _receivers;
     mapping(address => bytes32) public hashes;
@@ -31,13 +33,13 @@ contract AutoTopUp is Ownable {
     );
     event LogTaskCancelled(address indexed receiver, bytes32 cancelledHash);
 
-    constructor(address payable _gelato) {
-        gelato = _gelato;
-    }
-
     modifier gelatofy() {
         require(msg.sender == gelato, "AutoTopUp: Only gelato");
         _;
+    }
+
+    constructor(address payable _gelato) {
+        gelato = _gelato;
     }
 
     /// @notice deposit funds

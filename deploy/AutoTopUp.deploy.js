@@ -1,4 +1,4 @@
-const { sleep } = require("@gelatonetwork/core");
+const sleep = "../src/utils/sleep.js";
 const { network } = require("hardhat");
 
 module.exports = async (hre) => {

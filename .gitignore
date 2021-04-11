@@ -1,10 +1,21 @@
+# Dependency directory
 node_modules
 
-#Hardhat files
-cache
-artifacts
-
-# environment
+# local env variables
 .env
 
-.eslintcache
+#hardhat
+artifacts/
+cache/
+coverage/
+coverage.json
+
+# ESLint
+*.eslintcache
+
+# macOS
+.DS_Store
+*.icloud
+
+# yarn
+yarn-error.log

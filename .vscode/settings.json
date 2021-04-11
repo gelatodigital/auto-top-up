@@ -1,0 +1,9 @@
+{
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  // Solidity
+  "solidity.compileUsingRemoteVersion": "v0.8.3+commit.8d00100c",
+  "solidity.formatter": "prettier",
+  "solidity.linter": "solhint",
+  "solidity.packageDefaultDependenciesContractsDirectory": "",
+  "solidity.packageDefaultDependenciesDirectory": "node_modules"
+}

@@ -1,4 +1,4 @@
-const { sleep } = require("@gelatonetwork/core");
+const sleep = "../src/utils/sleep.js";
 
 module.exports = async (hre) => {
   /*if (hre.network.name=='ropsten') {

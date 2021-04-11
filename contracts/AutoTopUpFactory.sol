@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity 0.8.0;
+pragma solidity 0.8.3;
 
-import {EnumerableSet} from "./openzeppelin/utils/EnumerableSet.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {
+    EnumerableSet
+} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {AutoTopUp} from "./AutoTopUp.sol";
-import {Ownable} from "./openzeppelin/access/Ownable.sol";
 
 contract AutoTopUpFactory is Ownable {
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -13,12 +15,17 @@ contract AutoTopUpFactory is Ownable {
 
     EnumerableSet.AddressSet internal _autoTopUps;
 
-    event LogContractDeployed(address indexed autoTopUp, address owner);
-
     address payable public immutable gelato;
+
+    event LogContractDeployed(address indexed autoTopUp, address owner);
 
     constructor(address payable _gelato) {
         gelato = _gelato;
+    }
+
+    function withdraw(uint256 _amount, address payable _to) external onlyOwner {
+        (bool success, ) = _to.call{value: _amount}("");
+        require(success, "AutoTopUpFactory: withdraw: ETH transfer failed");
     }
 
     function newAutoTopUp(
@@ -74,10 +81,5 @@ contract AutoTopUpFactory is Ownable {
         currentAutoTopUps = new address[](length);
         for (uint256 i; i < length; i++)
             currentAutoTopUps[i] = _autoTopUps.at(i);
-    }
-
-    function withdraw(uint256 _amount, address payable _to) external onlyOwner {
-        (bool success, ) = _to.call{value: _amount}("");
-        require(success, "AutoTopUpFactory: withdraw: ETH transfer failed");
     }
 }
