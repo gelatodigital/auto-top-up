@@ -15,8 +15,6 @@ let autoTopUpFactory;
 describe("Gelato Auto Top Up Factory Test Suite", function () {
   this.timeout(0);
   before("tests", async () => {
-    await deployments.fixture();
-
     [owner, user, receiver] = await ethers.getSigners();
     userAddress = await user.getAddress();
     receiverAddress = await receiver.getAddress();
@@ -26,9 +24,11 @@ describe("Gelato Auto Top Up Factory Test Suite", function () {
       params: [executorAddress],
     });
 
-    autoTopUpFactory = await ethers.getContractAt(
-      "AutoTopUpFactory",
-      (await deployments.get("AutoTopUpFactory")).address
+    const autoTopUpFactoryDeployer = await ethers.getContractFactory(
+      "AutoTopUpFactory"
+    );
+    autoTopUpFactory = await autoTopUpFactoryDeployer.deploy(
+      network.config.PokeMe
     );
   });
 

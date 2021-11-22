@@ -5,12 +5,14 @@ import {
     EnumerableSet
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {
-    SafeERC20, IERC20
+    SafeERC20,
+    IERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Gelatofied} from "./Gelatofied.sol";
+import {PokeMeReady} from "./PokeMeReady.sol";
+import {IPokeMe} from "./interfaces/IPokeMe.sol";
 
-contract AutoTopUp is Ownable, Gelatofied {
+contract AutoTopUp is Ownable, PokeMeReady {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     struct TopUpData {
@@ -36,7 +38,7 @@ contract AutoTopUp is Ownable, Gelatofied {
     event LogTaskCancelled(address indexed receiver, bytes32 cancelledHash);
 
     // solhint-disable-next-line no-empty-blocks
-    constructor(address payable _gelato) Gelatofied(_gelato) {}
+    constructor(address _pokeMe) PokeMeReady(_pokeMe) {}
 
     /// @notice deposit funds
     receive() external payable {
@@ -106,12 +108,11 @@ contract AutoTopUp is Ownable, Gelatofied {
 
     /// @dev entry point for gelato executiom
     /// @notice overcharging is prevented on Gelato.sol
-    function exec(
+    function topUp(
         address payable _receiver,
         uint256 _amount,
-        uint256 _balanceThreshold,
-        uint256 _fee
-    ) external gelatofy(_fee, ETH) {
+        uint256 _balanceThreshold
+    ) external onlyPokeMe {
         require(
             isScheduled(_receiver, _amount, _balanceThreshold),
             "AutoTopUp: exec: Hash invalid"
@@ -120,6 +121,12 @@ contract AutoTopUp is Ownable, Gelatofied {
             _receiver.balance <= _balanceThreshold,
             "AutoTopUp: exec: Balance not below threshold"
         );
+
+        uint256 fee;
+        address feeToken;
+        (fee, feeToken) = IPokeMe(pokeMe).getFeeDetails();
+
+        _transfer(fee, feeToken);
 
         bool success;
         (success, ) = _receiver.call{value: _amount}("");

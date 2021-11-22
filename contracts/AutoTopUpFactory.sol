@@ -6,6 +6,7 @@ import {
     EnumerableSet
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {AutoTopUp} from "./AutoTopUp.sol";
+import {IAutoTopUp} from "./interfaces/IAutoTopUp.sol";
 
 contract AutoTopUpFactory is Ownable {
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -15,12 +16,12 @@ contract AutoTopUpFactory is Ownable {
 
     EnumerableSet.AddressSet internal _autoTopUps;
 
-    address payable public immutable gelato;
+    address public immutable pokeMe;
 
     event LogContractDeployed(address indexed autoTopUp, address owner);
 
-    constructor(address payable _gelato) {
-        gelato = _gelato;
+    constructor(address _pokeMe) {
+        pokeMe = _pokeMe;
     }
 
     function withdraw(uint256 _amount, address payable _to) external onlyOwner {
@@ -43,7 +44,7 @@ contract AutoTopUpFactory is Ownable {
             "AutoTopUpFactory: newAutoTopUp: Input length mismatch"
         );
 
-        autoTopUp = new AutoTopUp(gelato);
+        autoTopUp = new AutoTopUp(pokeMe);
         for (uint256 i; i < _receivers.length; i++) {
             autoTopUp.startAutoPay(
                 _receivers[i],
@@ -81,5 +82,48 @@ contract AutoTopUpFactory is Ownable {
         currentAutoTopUps = new address[](length);
         for (uint256 i; i < length; i++)
             currentAutoTopUps[i] = _autoTopUps.at(i);
+    }
+
+    /// @notice Checks if gelato should execute top up
+    /// @param _autoTopUp contract address of auto top up
+    /// @param _maxGasPrice max gas price to use for top up
+    function checker(address _autoTopUp, uint256 _maxGasPrice)
+        external
+        view
+        returns (bool, bytes memory)
+    {
+        if (tx.gasprice > _maxGasPrice)
+            return (false, bytes("Gas price too high"));
+
+        IAutoTopUp autoTopUp = IAutoTopUp(_autoTopUp);
+
+        address[] memory receivers = autoTopUp.getReceivers();
+
+        for (uint256 x; x < receivers.length; x++) {
+            address receiver = receivers[x];
+
+            IAutoTopUp.TopUpData memory topUpData =
+                autoTopUp.receiverDetails(receiver);
+
+            if (receiver.balance < topUpData.balanceThreshold) {
+                if (_autoTopUp.balance < topUpData.amount)
+                    return (
+                        false,
+                        bytes("Insufficient funds to top up receiver")
+                    );
+
+                bytes memory execData =
+                    abi.encodeWithSelector(
+                        IAutoTopUp.topUp.selector,
+                        receiver,
+                        topUpData.amount,
+                        topUpData.balanceThreshold
+                    );
+
+                return (true, execData);
+            }
+        }
+
+        return (false, bytes("No address to top up"));
     }
 }

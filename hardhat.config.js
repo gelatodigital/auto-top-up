@@ -23,6 +23,7 @@ const mainnetAddresses = {
   ETH: ETH_ADDRESS,
   GelatoExecutor: "0x3b110ce530bfc5ce5a966fe7fe13f0ea7d56b734",
   GelatoGasPriceOracle: "0x169E633A2D1E6c10dD91238Ba11c4A708dfEF37C",
+  PokeMe: "0xB3f5503f93d5Ef84b06993a1975B9D21B962892F",
 };
 
 const ropstenAddresses = {
@@ -30,6 +31,7 @@ const ropstenAddresses = {
   ETH: ETH_ADDRESS,
   GelatoExecutor: "0x3B110Ce530BfC5Ce5A966Fe7FE13f0ea7d56b734",
   GelatoGasPriceOracle: "0x20F44678Fc2344a78E84192e82Cede989Bf1da6F",
+  PokeMe: "0x9C4771560d84222fD8B7d9f15C59193388cC81B3",
 };
 
 module.exports = {
@@ -51,7 +53,7 @@ module.exports = {
     hardhat: {
       forking: {
         url: `https://eth-mainnet.alchemyapi.io/v2/${ALCHEMY_ID}`,
-        blockNumber: 12243993,
+        blockNumber: 13663800,
       },
       ...mainnetAddresses,
     },
@@ -80,6 +82,10 @@ module.exports = {
         },
       },
     ],
+    typechain: {
+      outDir: "typechain",
+      target: "ethers-v5",
+    },
   },
 
   mocha: {

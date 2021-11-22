@@ -16,7 +16,7 @@ module.exports = async (hre) => {
 
   await deploy("AutoTopUp", {
     from: deployer,
-    args: [hre.network.config.Gelato],
+    args: [hre.network.config.PokeMe],
     gasPrice: network.config.gasPrice,
     gasLimit: 5000000,
   });

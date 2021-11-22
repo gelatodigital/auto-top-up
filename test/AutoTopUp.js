@@ -1,9 +1,10 @@
 const { expect } = require("chai");
-const { ethers, network, deployments, waffle } = require("hardhat");
+const { ethers, network, waffle } = require("hardhat");
 const { getGasPrice } = require("./helpers/gelatoHelper");
 const { utils } = ethers;
 
 const ETH = network.config.ETH;
+const MAX_GAS = ethers.utils.parseUnits("90", "gwei");
 let owner;
 let user;
 let receiver;
@@ -11,16 +12,16 @@ let ownerAddress;
 let userAddress;
 let receiverAddress;
 let executor;
-let executorAddress = network.config.GelatoExecutor;
+let executorAddress = network.config.Gelato;
 let autoTopUp;
-let gelato;
+let autoTopUpFactory;
+let pokeMe;
 let gasPrice;
+let resolverHash;
 
 describe("Gelato Auto Top Up Test Suite", function () {
   this.timeout(0);
   before("tests", async () => {
-    await deployments.fixture();
-
     [owner, user, receiver] = await ethers.getSigners();
     userAddress = await user.getAddress();
     ownerAddress = await owner.getAddress();
@@ -35,12 +36,42 @@ describe("Gelato Auto Top Up Test Suite", function () {
 
     executor = await ethers.provider.getSigner(executorAddress);
 
-    gelato = await ethers.getContractAt("IGelato", network.config.Gelato);
+    pokeMe = await ethers.getContractAt("IPokeMe", network.config.PokeMe);
 
-    autoTopUp = await ethers.getContractAt(
-      "AutoTopUp",
-      (await deployments.get("AutoTopUp")).address
+    const autoTopUpDeployer = await ethers.getContractFactory("AutoTopUp");
+    autoTopUp = await autoTopUpDeployer.deploy(network.config.PokeMe);
+
+    const autoTopUpFactoryDeployer = await ethers.getContractFactory(
+      "AutoTopUpFactory"
     );
+    autoTopUpFactory = await autoTopUpFactoryDeployer.deploy(
+      network.config.PokeMe
+    );
+  });
+
+  it("Create task on pokeMe", async () => {
+    const resolverData = autoTopUpFactory.interface.encodeFunctionData(
+      "checker",
+      [autoTopUp.address, MAX_GAS]
+    );
+
+    resolverHash = await pokeMe.getResolverHash(
+      autoTopUpFactory.address,
+      resolverData
+    );
+
+    await pokeMe
+      .connect(owner)
+      .createTaskNoPrepayment(
+        autoTopUp.address,
+        autoTopUp.interface.getSighash("topUp"),
+        autoTopUpFactory.address,
+        resolverData,
+        ETH
+      );
+
+    const ids = await pokeMe.getTaskIdsByUser(ownerAddress);
+    expect(ids.length).to.be.eql(1);
   });
 
   it("Admin can deposit funds", async () => {
@@ -138,70 +169,60 @@ describe("Gelato Auto Top Up Test Suite", function () {
         .startAutoPay(receiverAddress, amount, balanceThreshold)
     ).to.emit(autoTopUp, "LogTaskSubmitted");
 
-    const dummyPayload = autoTopUp.interface.encodeFunctionData("exec", [
-      receiverAddress,
-      amount,
-      balanceThreshold,
-      1,
-    ]);
-
-    await expect(
-      gelato.connect(executor).exec(autoTopUp.address, dummyPayload, ETH)
-    ).to.be.revertedWith(
-      "ExecFacet.exec:AutoTopUp: exec: Balance not below threshold"
+    let [canExec, execPayload] = await autoTopUpFactory.checker(
+      autoTopUp.address,
+      MAX_GAS
     );
 
-    const wrongAmountPayload = autoTopUp.interface.encodeFunctionData("exec", [
-      receiverAddress,
-      500000000,
-      balanceThreshold,
-      1,
-    ]);
+    expect(canExec).to.be.eql(false);
 
-    await expect(
-      gelato.connect(executor).exec(autoTopUp.address, wrongAmountPayload, ETH)
-    ).to.be.revertedWith("ExecFacet.exec:AutoTopUp: exec: Hash invalid");
+    const balance = await ethers.provider.getBalance(receiverAddress);
+    const ethToWithdraw = balance.sub(balanceThreshold);
 
-    const preBalance = await waffle.provider.getBalance(receiverAddress);
-
-    expect(preBalance).to.be.gt(amount);
-
-    const withdrawThatTriggersExec = preBalance.sub(amount);
-
-    const txReceipt = await receiver.sendTransaction({
-      value: withdrawThatTriggersExec,
-      to: userAddress,
+    await receiver.sendTransaction({
+      value: ethToWithdraw,
+      to: executorAddress,
       gasPrice: gasPrice,
     });
-    const { gasUsed } = await txReceipt.wait();
 
-    const txCosts = gasUsed.mul(gasPrice);
+    const preBalance = await ethers.provider.getBalance(receiverAddress);
 
-    const [fee] = await gelato
-      .connect(executor)
-      .callStatic.estimateExecGasDebit(autoTopUp.address, dummyPayload, ETH, {
-        gasPrice: gasPrice,
-      });
-
-    // console.log(`Fee: ${ethers.utils.formatEther(fee)}`);
-
-    const payload = autoTopUp.interface.encodeFunctionData("exec", [
-      receiverAddress,
-      amount,
-      balanceThreshold,
-      fee,
-    ]);
-
-    await expect(
-      gelato.connect(executor).exec(autoTopUp.address, payload, ETH, {
-        gasPrice: gasPrice,
-      })
-    ).to.emit(gelato, "LogExecSuccess");
-
-    const postBalance = await waffle.provider.getBalance(receiverAddress);
-    expect(postBalance).to.be.eq(
-      preBalance.sub(withdrawThatTriggersExec).add(amount).sub(txCosts)
+    // !canExec when gasprice > maxGasPrice
+    [canExec, execPayload] = await autoTopUpFactory.checker(
+      autoTopUp.address,
+      MAX_GAS,
+      { gasPrice: MAX_GAS.add(1) }
     );
+
+    expect(canExec).to.be.eql(false);
+
+    [canExec, execPayload] = await autoTopUpFactory.checker(
+      autoTopUp.address,
+      MAX_GAS,
+      { gasPrice: MAX_GAS }
+    );
+
+    expect(canExec).to.be.eql(true);
+
+    await pokeMe
+      .connect(executor)
+      .exec(
+        ethers.utils.parseEther("1"),
+        ETH,
+        ownerAddress,
+        false,
+        resolverHash,
+        autoTopUp.address,
+        execPayload
+      );
+
+    const postBalance = await ethers.provider.getBalance(receiverAddress);
+
+    expect(postBalance.gt(preBalance)).to.be.eql(true);
+
+    [canExec] = await autoTopUpFactory.checker(autoTopUp.address, MAX_GAS);
+
+    expect(canExec).to.be.eql(false);
   });
 
   it("Receiver should be querieable off-chain", async () => {
