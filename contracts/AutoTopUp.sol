@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity 0.8.3;
+pragma solidity 0.8.16;
 
 import {
     EnumerableSet
@@ -9,10 +9,9 @@ import {
     IERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {PokeMeReady} from "./PokeMeReady.sol";
-import {IPokeMe} from "./interfaces/IPokeMe.sol";
+import "./ops/OpsReady.sol";
 
-contract AutoTopUp is Ownable, PokeMeReady {
+contract AutoTopUp is Ownable, OpsReady {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     struct TopUpData {
@@ -37,8 +36,10 @@ contract AutoTopUp is Ownable, PokeMeReady {
     );
     event LogTaskCancelled(address indexed receiver, bytes32 cancelledHash);
 
-    // solhint-disable-next-line no-empty-blocks
-    constructor(address _pokeMe) PokeMeReady(_pokeMe) {}
+    // solhint-disable no-empty-blocks
+    constructor(address _ops, address _autoTopUpFactory)
+        OpsReady(_ops, _autoTopUpFactory)
+    {}
 
     /// @notice deposit funds
     receive() external payable {
@@ -80,7 +81,7 @@ contract AutoTopUp is Ownable, PokeMeReady {
             balanceThreshold: _balanceThreshold
         });
 
-        LogTaskSubmitted(_receiver, _amount, _balanceThreshold);
+        emit LogTaskSubmitted(_receiver, _amount, _balanceThreshold);
     }
 
     /// @notice stop an autopay
@@ -103,7 +104,7 @@ contract AutoTopUp is Ownable, PokeMeReady {
         delete hashes[_receiver];
         delete receiverDetails[_receiver];
 
-        LogTaskCancelled(_receiver, storedHash);
+        emit LogTaskCancelled(_receiver, storedHash);
     }
 
     /// @dev entry point for gelato executiom
@@ -112,7 +113,7 @@ contract AutoTopUp is Ownable, PokeMeReady {
         address payable _receiver,
         uint256 _amount,
         uint256 _balanceThreshold
-    ) external onlyPokeMe {
+    ) external onlyDedicatedMsgSender {
         require(
             isScheduled(_receiver, _amount, _balanceThreshold),
             "AutoTopUp: exec: Hash invalid"
@@ -122,15 +123,15 @@ contract AutoTopUp is Ownable, PokeMeReady {
             "AutoTopUp: exec: Balance not below threshold"
         );
 
-        uint256 fee;
-        address feeToken;
-        (fee, feeToken) = IPokeMe(pokeMe).getFeeDetails();
-
-        _transfer(fee, feeToken);
-
         bool success;
         (success, ) = _receiver.call{value: _amount}("");
         require(success, "AutoTopUp: exec: Receiver payment failed");
+
+        uint256 fee;
+        address feeToken;
+        (fee, feeToken) = ops.getFeeDetails();
+
+        _transfer(fee, feeToken);
     }
 
     /// @notice Get all receivers

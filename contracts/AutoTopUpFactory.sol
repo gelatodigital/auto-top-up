@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity 0.8.3;
+pragma solidity 0.8.16;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {
@@ -7,8 +7,9 @@ import {
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {AutoTopUp} from "./AutoTopUp.sol";
 import {IAutoTopUp} from "./interfaces/IAutoTopUp.sol";
+import "./ops/OpsTaskCreator.sol";
 
-contract AutoTopUpFactory is Ownable {
+contract AutoTopUpFactory is Ownable, OpsTaskCreator {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     mapping(address => AutoTopUp) public autoTopUpByOwner;
@@ -16,13 +17,10 @@ contract AutoTopUpFactory is Ownable {
 
     EnumerableSet.AddressSet internal _autoTopUps;
 
-    address public immutable pokeMe;
-
     event LogContractDeployed(address indexed autoTopUp, address owner);
 
-    constructor(address _pokeMe) {
-        pokeMe = _pokeMe;
-    }
+    // solhint-disable no-empty-blocks
+    constructor(address _ops) OpsTaskCreator(_ops, msg.sender) {}
 
     function withdraw(uint256 _amount, address payable _to) external onlyOwner {
         (bool success, ) = _to.call{value: _amount}("");
@@ -44,7 +42,7 @@ contract AutoTopUpFactory is Ownable {
             "AutoTopUpFactory: newAutoTopUp: Input length mismatch"
         );
 
-        autoTopUp = new AutoTopUp(pokeMe);
+        autoTopUp = new AutoTopUp(address(ops), address(this));
         for (uint256 i; i < _receivers.length; i++) {
             autoTopUp.startAutoPay(
                 _receivers[i],
@@ -84,17 +82,11 @@ contract AutoTopUpFactory is Ownable {
             currentAutoTopUps[i] = _autoTopUps.at(i);
     }
 
-    /// @notice Checks if gelato should execute top up
-    /// @param _autoTopUp contract address of auto top up
-    /// @param _maxGasPrice max gas price to use for top up
-    function checker(address _autoTopUp, uint256 _maxGasPrice)
+    function checker(address _autoTopUp)
         external
         view
         returns (bool, bytes memory)
     {
-        if (tx.gasprice > _maxGasPrice)
-            return (false, bytes("Gas price too high"));
-
         IAutoTopUp autoTopUp = IAutoTopUp(_autoTopUp);
 
         address[] memory receivers = autoTopUp.getReceivers();
@@ -125,5 +117,26 @@ contract AutoTopUpFactory is Ownable {
         }
 
         return (false, bytes("No address to top up"));
+    }
+
+    function _createOpsTask(address _autoTopUp) private {
+        ModuleData memory moduleData =
+            ModuleData({modules: new Module[](2), args: new bytes[](2)});
+
+        moduleData.modules[0] = Module.RESOLVER;
+        moduleData.modules[1] = Module.PROXY;
+
+        moduleData.args[0] = _resolverModuleArg(
+            address(this),
+            abi.encodeCall(this.checker, (_autoTopUp))
+        );
+        moduleData.args[1] = _proxyModuleArg();
+
+        _createTask(
+            _autoTopUp,
+            abi.encode(IAutoTopUp.topUp.selector),
+            moduleData,
+            ETH
+        );
     }
 }
