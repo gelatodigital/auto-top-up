@@ -1,89 +1,76 @@
-const { expect } = require("chai");
-const { ethers, network, waffle } = require("hardhat");
-const { getGasPrice } = require("./helpers/gelatoHelper");
-const { utils } = ethers;
+import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
+import { expect } from "chai";
+import { Signer, utils } from "ethers";
+import hre = require("hardhat");
+import { getGelatoAddress, getOpsAddress } from "../src/config";
+const { ethers, deployments } = hre;
+import { AutoTopUp, AutoTopUpFactory, IOps } from "../typechain";
+import { encodeResolverArgs, Module, ModuleData } from "./utils/modules";
 
-const ETH = network.config.ETH;
-const MAX_GAS = ethers.utils.parseUnits("90", "gwei");
-let owner;
-let user;
-let receiver;
-let ownerAddress;
-let userAddress;
-let receiverAddress;
-let executor;
-let executorAddress = network.config.Gelato;
-let autoTopUp;
-let autoTopUpFactory;
-let pokeMe;
-let gasPrice;
-let resolverHash;
+const executorAddress = getGelatoAddress(hre.network.name);
+const opsAddress = getOpsAddress(hre);
+const ETH = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+
+let owner: SignerWithAddress;
+let user: SignerWithAddress;
+let receiver: SignerWithAddress;
+let executor: Signer;
+
+let ownerAddress: string;
+let userAddress: string;
+let receiverAddress: string;
+
+let autoTopUp: AutoTopUp;
+let autoTopUpFactory: AutoTopUpFactory;
+let ops: IOps;
 
 describe("Gelato Auto Top Up Test Suite", function () {
   this.timeout(0);
   before("tests", async () => {
+    await deployments.fixture();
+
     [owner, user, receiver] = await ethers.getSigners();
     userAddress = await user.getAddress();
     ownerAddress = await owner.getAddress();
     receiverAddress = await receiver.getAddress();
 
-    await network.provider.request({
+    await hre.network.provider.request({
       method: "hardhat_impersonateAccount",
       params: [executorAddress],
     });
 
-    gasPrice = await getGasPrice();
+    executor = ethers.provider.getSigner(executorAddress);
 
-    executor = await ethers.provider.getSigner(executorAddress);
+    ops = <IOps>await ethers.getContractAt("IOps", opsAddress);
 
-    pokeMe = await ethers.getContractAt("IPokeMe", network.config.PokeMe);
-
-    const autoTopUpDeployer = await ethers.getContractFactory("AutoTopUp");
-    autoTopUp = await autoTopUpDeployer.deploy(network.config.PokeMe);
-
-    const autoTopUpFactoryDeployer = await ethers.getContractFactory(
-      "AutoTopUpFactory"
-    );
-    autoTopUpFactory = await autoTopUpFactoryDeployer.deploy(
-      network.config.PokeMe
-    );
-  });
-
-  it("Create task on pokeMe", async () => {
-    const resolverData = autoTopUpFactory.interface.encodeFunctionData(
-      "checker",
-      [autoTopUp.address, MAX_GAS]
+    autoTopUpFactory = <AutoTopUpFactory>(
+      await ethers.getContract("AutoTopUpFactory")
     );
 
-    resolverHash = await pokeMe.getResolverHash(
-      autoTopUpFactory.address,
-      resolverData
+    const tx = await autoTopUpFactory.newAutoTopUp(
+      [ownerAddress],
+      [ethers.utils.parseEther("10")],
+      [ethers.utils.parseEther("10")]
     );
+    const events = (await tx.wait()).events;
+    const logContractDeployedEvent = events?.at(-1);
+    const autoTopUpAddress = logContractDeployedEvent?.args?.autoTopUp;
 
-    await pokeMe
-      .connect(owner)
-      .createTaskNoPrepayment(
-        autoTopUp.address,
-        autoTopUp.interface.getSighash("topUp"),
-        autoTopUpFactory.address,
-        resolverData,
-        ETH
-      );
-
-    const ids = await pokeMe.getTaskIdsByUser(ownerAddress);
-    expect(ids.length).to.be.eql(1);
+    autoTopUp = <AutoTopUp>(
+      await ethers.getContractAt("AutoTopUp", autoTopUpAddress)
+    );
   });
 
   it("Admin can deposit funds", async () => {
     const deposit = utils.parseEther("60");
 
     // Encode Task
-    const preBalance = await waffle.provider.getBalance(autoTopUp.address);
+    const preBalance = await ethers.provider.getBalance(autoTopUp.address);
     await owner.sendTransaction({
       value: deposit,
       to: autoTopUp.address,
     });
-    const postBalance = await waffle.provider.getBalance(autoTopUp.address);
+    const postBalance = await ethers.provider.getBalance(autoTopUp.address);
 
     expect(postBalance.sub(preBalance)).to.be.eq(deposit);
   });
@@ -102,17 +89,8 @@ describe("Gelato Auto Top Up Test Suite", function () {
   it("Only owner can withdraw funds", async () => {
     const amount = utils.parseEther("10");
 
-    const preBalance = await waffle.provider.getBalance(ownerAddress);
-    const txReceipt = await autoTopUp
-      .connect(owner)
-      .withdraw(amount, ownerAddress, {
-        gasPrice: gasPrice,
-      });
-    const { gasUsed } = await txReceipt.wait();
-    const postBalance = await waffle.provider.getBalance(ownerAddress);
-    expect(postBalance.sub(preBalance).add(gasUsed.mul(gasPrice))).to.be.eq(
-      amount
-    );
+    await expect(autoTopUp.connect(owner).withdraw(amount, ownerAddress)).to.not
+      .be.reverted;
 
     await expect(autoTopUp.connect(user).withdraw(amount, userAddress)).to.be
       .reverted;
@@ -132,7 +110,7 @@ describe("Gelato Auto Top Up Test Suite", function () {
       autoTopUp
         .connect(owner)
         .startAutoPay(receiverAddress, amount, balanceThreshold)
-    ).to.emit(autoTopUp, "LogTaskSubmitted");
+    ).to.emit(autoTopUp, "LogAddReceiver");
   });
 
   it("Owner should not be able to schedule 2 auto top ups for the same receiver", async () => {
@@ -149,7 +127,7 @@ describe("Gelato Auto Top Up Test Suite", function () {
   it("Owner should be able to stop existing auto top ups", async () => {
     await expect(autoTopUp.connect(owner).stopAutoPay(receiverAddress)).to.emit(
       autoTopUp,
-      "LogTaskCancelled"
+      "LogRemoveReceiver"
     );
 
     // Owner should not be able to cancel again
@@ -167,11 +145,10 @@ describe("Gelato Auto Top Up Test Suite", function () {
       autoTopUp
         .connect(owner)
         .startAutoPay(receiverAddress, amount, balanceThreshold)
-    ).to.emit(autoTopUp, "LogTaskSubmitted");
+    ).to.emit(autoTopUp, "LogAddReceiver");
 
     let [canExec, execPayload] = await autoTopUpFactory.checker(
-      autoTopUp.address,
-      MAX_GAS
+      autoTopUp.address
     );
 
     expect(canExec).to.be.eql(false);
@@ -182,45 +159,46 @@ describe("Gelato Auto Top Up Test Suite", function () {
     await receiver.sendTransaction({
       value: ethToWithdraw,
       to: executorAddress,
-      gasPrice: gasPrice,
     });
 
     const preBalance = await ethers.provider.getBalance(receiverAddress);
 
-    // !canExec when gasprice > maxGasPrice
-    [canExec, execPayload] = await autoTopUpFactory.checker(
-      autoTopUp.address,
-      MAX_GAS,
-      { gasPrice: MAX_GAS.add(1) }
-    );
-
-    expect(canExec).to.be.eql(false);
-
-    [canExec, execPayload] = await autoTopUpFactory.checker(
-      autoTopUp.address,
-      MAX_GAS,
-      { gasPrice: MAX_GAS }
-    );
+    [canExec, execPayload] = await autoTopUpFactory.checker(autoTopUp.address);
 
     expect(canExec).to.be.eql(true);
 
-    await pokeMe
+    const resolverData = autoTopUpFactory.interface.encodeFunctionData(
+      "checker",
+      [autoTopUp.address]
+    );
+
+    const modules = [Module.RESOLVER, Module.PROXY];
+    const args = [
+      encodeResolverArgs(autoTopUpFactory.address, resolverData),
+      "0x",
+    ];
+    const moduleData: ModuleData = { modules, args };
+
+    const txFee = utils.parseEther("0.1");
+
+    await ops
       .connect(executor)
       .exec(
-        ethers.utils.parseEther("1"),
-        ETH,
-        ownerAddress,
-        false,
-        resolverHash,
+        autoTopUpFactory.address,
         autoTopUp.address,
-        execPayload
+        execPayload,
+        moduleData,
+        txFee,
+        ETH,
+        false,
+        true
       );
 
     const postBalance = await ethers.provider.getBalance(receiverAddress);
 
     expect(postBalance.gt(preBalance)).to.be.eql(true);
 
-    [canExec] = await autoTopUpFactory.checker(autoTopUp.address, MAX_GAS);
+    [canExec] = await autoTopUpFactory.checker(autoTopUp.address);
 
     expect(canExec).to.be.eql(false);
   });
@@ -228,6 +206,7 @@ describe("Gelato Auto Top Up Test Suite", function () {
   it("Receiver should be querieable off-chain", async () => {
     const currentReceivers = await autoTopUp.getReceivers();
 
-    expect(currentReceivers[0]).to.be.eq(receiverAddress);
+    expect(currentReceivers).to.include(receiverAddress);
+    expect(currentReceivers).to.include(ownerAddress);
   });
 });

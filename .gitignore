@@ -9,6 +9,7 @@ artifacts/
 cache/
 coverage/
 coverage.json
+typechain/
 
 # ESLint
 *.eslintcache
