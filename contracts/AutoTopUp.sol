@@ -29,12 +29,12 @@ contract AutoTopUp is Ownable, OpsReady {
         uint256 amount,
         address receiver
     );
-    event LogTaskSubmitted(
+    event LogAddReceiver(
         address indexed receiver,
         uint256 amount,
         uint256 balanceThreshold
     );
-    event LogTaskCancelled(address indexed receiver, bytes32 cancelledHash);
+    event LogRemoveReceiver(address indexed receiver, bytes32 cancelledHash);
 
     // solhint-disable no-empty-blocks
     constructor(address _ops, address _autoTopUpFactory)
@@ -81,7 +81,7 @@ contract AutoTopUp is Ownable, OpsReady {
             balanceThreshold: _balanceThreshold
         });
 
-        emit LogTaskSubmitted(_receiver, _amount, _balanceThreshold);
+        emit LogAddReceiver(_receiver, _amount, _balanceThreshold);
     }
 
     /// @notice stop an autopay
@@ -104,7 +104,7 @@ contract AutoTopUp is Ownable, OpsReady {
         delete hashes[_receiver];
         delete receiverDetails[_receiver];
 
-        emit LogTaskCancelled(_receiver, storedHash);
+        emit LogRemoveReceiver(_receiver, storedHash);
     }
 
     /// @dev entry point for gelato executiom
@@ -136,14 +136,8 @@ contract AutoTopUp is Ownable, OpsReady {
 
     /// @notice Get all receivers
     /// @dev useful to query which autoPays to cancel
-    function getReceivers()
-        external
-        view
-        returns (address[] memory currentReceivers)
-    {
-        uint256 length = _receivers.length();
-        currentReceivers = new address[](length);
-        for (uint256 i; i < length; i++) currentReceivers[i] = _receivers.at(i);
+    function getReceivers() external view returns (address[] memory) {
+        return _receivers.values();
     }
 
     function isScheduled(

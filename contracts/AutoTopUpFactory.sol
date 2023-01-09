@@ -17,7 +17,11 @@ contract AutoTopUpFactory is Ownable, OpsTaskCreator {
 
     EnumerableSet.AddressSet internal _autoTopUps;
 
-    event LogContractDeployed(address indexed autoTopUp, address owner);
+    event LogContractDeployed(
+        address indexed autoTopUp,
+        address indexed owner,
+        bytes32 indexed taskId
+    );
 
     // solhint-disable no-empty-blocks
     constructor(address _ops) OpsTaskCreator(_ops, msg.sender) {}
@@ -50,7 +54,6 @@ contract AutoTopUpFactory is Ownable, OpsTaskCreator {
                 _balanceThresholds[i]
             );
         }
-
         if (msg.value > 0) {
             (bool success, ) =
                 payable(address(autoTopUp)).call{value: msg.value}("");
@@ -66,7 +69,9 @@ contract AutoTopUpFactory is Ownable, OpsTaskCreator {
         ownerByAutoTopUp[autoTopUp] = msg.sender;
         _autoTopUps.add(address(autoTopUp));
 
-        emit LogContractDeployed(address(autoTopUp), msg.sender);
+        bytes32 taskId = _createOpsTask(address(autoTopUp));
+
+        emit LogContractDeployed(address(autoTopUp), msg.sender, taskId);
     }
 
     /// @notice Get all autoTopUps
@@ -119,7 +124,10 @@ contract AutoTopUpFactory is Ownable, OpsTaskCreator {
         return (false, bytes("No address to top up"));
     }
 
-    function _createOpsTask(address _autoTopUp) private {
+    function _createOpsTask(address _autoTopUp)
+        private
+        returns (bytes32 taskId)
+    {
         ModuleData memory moduleData =
             ModuleData({modules: new Module[](2), args: new bytes[](2)});
 
@@ -132,7 +140,7 @@ contract AutoTopUpFactory is Ownable, OpsTaskCreator {
         );
         moduleData.args[1] = _proxyModuleArg();
 
-        _createTask(
+        taskId = _createTask(
             _autoTopUp,
             abi.encode(IAutoTopUp.topUp.selector),
             moduleData,

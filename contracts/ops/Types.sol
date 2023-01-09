@@ -18,9 +18,25 @@ interface IOps {
 
     function cancelTask(bytes32 taskId) external;
 
+    function exec(
+        address taskCreator,
+        address execAddress,
+        bytes memory execData,
+        ModuleData calldata moduleData,
+        uint256 txFee,
+        address feeToken,
+        bool useTaskTreasuryFunds,
+        bool revertOnFailure
+    ) external;
+
     function getFeeDetails() external view returns (uint256, address);
 
     function gelato() external view returns (address payable);
+
+    function getTaskIdsByUser(address taskCreator)
+        external
+        view
+        returns (bytes32[] memory);
 
     function taskTreasury() external view returns (ITaskTreasuryUpgradable);
 }
