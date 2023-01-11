@@ -1,16 +1,23 @@
-const { expect } = require("chai");
-const { ethers, network, deployments, waffle } = require("hardhat");
-const { utils } = ethers;
+import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
+import { expect } from "chai";
+import { utils } from "ethers";
+import hre = require("hardhat");
+import { getGelatoAddress, getOpsAddress } from "../src/config";
+const { ethers, deployments } = hre;
+import { AutoTopUpFactory, IOps } from "../typechain";
 
-let owner;
-let user;
-let receiver;
+const executorAddress = getGelatoAddress(hre.network.name);
+const opsAddress = getOpsAddress(hre);
 
-let userAddress;
-let receiverAddress;
+let owner: SignerWithAddress;
+let user: SignerWithAddress;
+let receiver: SignerWithAddress;
 
-let executorAddress = network.config.GelatoExecutor;
-let autoTopUpFactory;
+let userAddress: string;
+let receiverAddress: string;
+
+let autoTopUpFactory: AutoTopUpFactory;
+let ops: IOps;
 
 describe("Gelato Auto Top Up Factory Test Suite", function () {
   this.timeout(0);
@@ -21,23 +28,23 @@ describe("Gelato Auto Top Up Factory Test Suite", function () {
     userAddress = await user.getAddress();
     receiverAddress = await receiver.getAddress();
 
-    await network.provider.request({
+    await hre.network.provider.request({
       method: "hardhat_impersonateAccount",
       params: [executorAddress],
     });
 
-    autoTopUpFactory = await ethers.getContractAt(
-      "AutoTopUpFactory",
-      (await deployments.get("AutoTopUpFactory")).address
+    autoTopUpFactory = <AutoTopUpFactory>(
+      await ethers.getContract("AutoTopUpFactory")
     );
+    ops = <IOps>await ethers.getContractAt("IOps", opsAddress);
   });
 
-  it("Check if AutoTopTop deploys correctly", async () => {
+  it("Check if AutoTopUpFactory deploys correctly", async () => {
     const deposit = utils.parseEther("40");
     const amount = utils.parseEther("10");
     const balanceThreshold = utils.parseEther("10");
 
-    await autoTopUpFactory
+    const tx = await autoTopUpFactory
       .connect(owner)
       .newAutoTopUp(
         [receiverAddress, userAddress],
@@ -48,19 +55,10 @@ describe("Gelato Auto Top Up Factory Test Suite", function () {
         }
       );
 
-    const block = await ethers.provider.getBlock();
-    const topics = autoTopUpFactory.filters.LogContractDeployed().topics;
-    const filter = {
-      address: autoTopUpFactory.address.toLowerCase(),
-      blockhash: block.hash,
-      topics,
-    };
-    const logs = await ethers.provider.getLogs(filter);
-    if (logs.length !== 1) {
-      throw Error("cannot find AutoTopUp");
-    }
-    const event = autoTopUpFactory.interface.parseLog(logs[0]);
-    const autoTopUpAddress = event.args.autoTopUp;
+    const events = (await tx.wait()).events;
+    const logContractDeployedEvent = events?.at(-1);
+    const autoTopUpAddress = logContractDeployedEvent?.args?.autoTopUp;
+    const opsTaskId = logContractDeployedEvent?.args?.taskId;
 
     const autoTopUp = await ethers.getContractAt("AutoTopUp", autoTopUpAddress);
 
@@ -74,13 +72,17 @@ describe("Gelato Auto Top Up Factory Test Suite", function () {
     ).to.be.revertedWith("Ownable: caller is not the owner");
 
     // Check balance of autoTopUp
-    const balance = await waffle.provider.getBalance(autoTopUp.address);
+    const balance = await ethers.provider.getBalance(autoTopUp.address);
     expect(balance).to.be.eq(deposit);
 
     // owner can cancel auto to up
     await expect(autoTopUp.connect(owner).stopAutoPay(receiverAddress)).to.emit(
       autoTopUp,
-      "LogTaskCancelled"
+      "LogRemoveReceiver"
     );
+
+    // check if task was created on ops
+    const taskIds = await ops.getTaskIdsByUser(autoTopUpFactory.address);
+    expect(taskIds).include(opsTaskId);
   });
 });

@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity 0.8.3;
+pragma solidity 0.8.16;
 
 import {
     EnumerableSet
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {
-    SafeERC20, IERC20
+    SafeERC20,
+    IERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Gelatofied} from "./Gelatofied.sol";
+import "./ops/OpsReady.sol";
 
-contract AutoTopUp is Ownable, Gelatofied {
+contract AutoTopUp is Ownable, OpsReady {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     struct TopUpData {
@@ -28,15 +29,17 @@ contract AutoTopUp is Ownable, Gelatofied {
         uint256 amount,
         address receiver
     );
-    event LogTaskSubmitted(
+    event LogAddReceiver(
         address indexed receiver,
         uint256 amount,
         uint256 balanceThreshold
     );
-    event LogTaskCancelled(address indexed receiver, bytes32 cancelledHash);
+    event LogRemoveReceiver(address indexed receiver, bytes32 cancelledHash);
 
-    // solhint-disable-next-line no-empty-blocks
-    constructor(address payable _gelato) Gelatofied(_gelato) {}
+    // solhint-disable no-empty-blocks
+    constructor(address _ops, address _autoTopUpFactory)
+        OpsReady(_ops, _autoTopUpFactory)
+    {}
 
     /// @notice deposit funds
     receive() external payable {
@@ -78,7 +81,7 @@ contract AutoTopUp is Ownable, Gelatofied {
             balanceThreshold: _balanceThreshold
         });
 
-        LogTaskSubmitted(_receiver, _amount, _balanceThreshold);
+        emit LogAddReceiver(_receiver, _amount, _balanceThreshold);
     }
 
     /// @notice stop an autopay
@@ -101,17 +104,16 @@ contract AutoTopUp is Ownable, Gelatofied {
         delete hashes[_receiver];
         delete receiverDetails[_receiver];
 
-        LogTaskCancelled(_receiver, storedHash);
+        emit LogRemoveReceiver(_receiver, storedHash);
     }
 
     /// @dev entry point for gelato executiom
     /// @notice overcharging is prevented on Gelato.sol
-    function exec(
+    function topUp(
         address payable _receiver,
         uint256 _amount,
-        uint256 _balanceThreshold,
-        uint256 _fee
-    ) external gelatofy(_fee, ETH) {
+        uint256 _balanceThreshold
+    ) external onlyDedicatedMsgSender {
         require(
             isScheduled(_receiver, _amount, _balanceThreshold),
             "AutoTopUp: exec: Hash invalid"
@@ -124,18 +126,18 @@ contract AutoTopUp is Ownable, Gelatofied {
         bool success;
         (success, ) = _receiver.call{value: _amount}("");
         require(success, "AutoTopUp: exec: Receiver payment failed");
+
+        uint256 fee;
+        address feeToken;
+        (fee, feeToken) = ops.getFeeDetails();
+
+        _transfer(fee, feeToken);
     }
 
     /// @notice Get all receivers
     /// @dev useful to query which autoPays to cancel
-    function getReceivers()
-        external
-        view
-        returns (address[] memory currentReceivers)
-    {
-        uint256 length = _receivers.length();
-        currentReceivers = new address[](length);
-        for (uint256 i; i < length; i++) currentReceivers[i] = _receivers.at(i);
+    function getReceivers() external view returns (address[] memory) {
+        return _receivers.values();
     }
 
     function isScheduled(
